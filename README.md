@@ -5,7 +5,7 @@ A Java bytecode obfuscator built with ASM.
 ## Features
 - **Renaming**: Renames classes, methods, and fields.
 - **Flow Obfuscation**: Implements control flow flattening.
-- **Number Obfuscation**: Obfuscates integer constants by moving them into static arrays.
+- **Number Obfuscation**: Obfuscates integer and long constants using recursive arithmetic and bitwise operations.
 
 ## TODO
 - *String Obfuscation*

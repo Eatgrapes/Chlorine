@@ -1,186 +1,166 @@
 package dev.eatgrapes.chlorine.transformers.impl;
 
 import dev.eatgrapes.chlorine.transformers.Transformer;
-import dev.eatgrapes.chlorine.utils.NameGenerator;
 import org.objectweb.asm.Opcodes;
 import org.objectweb.asm.tree.*;
 
 import java.util.*;
 
 public class NumberObfuscationTransformer extends Transformer {
+    private final Random random = new Random();
+
     @Override
-    public String getName() { return "NumberObfuscation"; }
+    public String getName() {
+        return "NumberObfuscation";
+    }
 
     @Override
     public void transform(Map<String, ClassNode> classes, Map<String, String> manifest, Set<String> keeps) {
         for (ClassNode cn : classes.values()) {
             if (shouldKeep(cn.name, keeps) || (cn.access & Opcodes.ACC_INTERFACE) != 0) continue;
-            
-            List<Integer> constants = new ArrayList<>();
-            for (MethodNode mn : cn.methods) {
-                for (AbstractInsnNode insn : mn.instructions) {
-                    if (insn instanceof IntInsnNode) {
-                    } else if (insn instanceof LdcInsnNode) {
-                        LdcInsnNode ldc = (LdcInsnNode) insn;
-                        if (ldc.cst instanceof Integer) {
-                            constants.add((Integer) ldc.cst);
-                        }
-                    }
-                }
-            }
-            
-            if (constants.isEmpty()) continue;
-            
-            String fieldName = new NameGenerator().next() + "_ints";
-            FieldNode fn = new FieldNode(Opcodes.ACC_PUBLIC | Opcodes.ACC_STATIC, fieldName, "[I", null, null);
-            cn.fields.add(fn);
-            
-            MethodNode clinit = null;
-            for (MethodNode mn : cn.methods) {
-                if (mn.name.equals("<clinit>")) {
-                    clinit = mn;
-                    break;
-                }
-            }
-            if (clinit == null) {
-                clinit = new MethodNode(Opcodes.ACC_STATIC, "<clinit>", "()V", null, null);
-                clinit.instructions.add(new InsnNode(Opcodes.RETURN));
-                cn.methods.add(clinit);
-            }
-            
-            InsnList init = new InsnList();
-            init.add(new LdcInsnNode(constants.size()));
-            init.add(new IntInsnNode(Opcodes.NEWARRAY, Opcodes.T_INT));
-            
-            for (int i = 0; i < constants.size(); i++) {
-                init.add(new InsnNode(Opcodes.DUP));
-                init.add(new LdcInsnNode(i));
-                init.add(new LdcInsnNode(constants.get(i)));
-                init.add(new InsnNode(Opcodes.IASTORE));
-            }
-            init.add(new FieldInsnNode(Opcodes.PUTSTATIC, cn.name, fieldName, "[I"));
-            
-            clinit.instructions.insert(init);
-            
-            for (MethodNode mn : cn.methods) {
-                 ListIterator<AbstractInsnNode> it = mn.instructions.iterator();
-                 while(it.hasNext()) {
-                     AbstractInsnNode insn = it.next();
-                     if (insn instanceof LdcInsnNode) {
-                         LdcInsnNode ldc = (LdcInsnNode) insn;
-                         if (ldc.cst instanceof Integer) {
-                             int val = (Integer) ldc.cst;
-                             int idx = constants.indexOf(val); 
-                         }
-                     }
-                 }
-            }
-        }
-        
-        for (ClassNode cn : classes.values()) {
-            if (shouldKeep(cn.name, keeps) || (cn.access & Opcodes.ACC_INTERFACE) != 0) continue;
 
-            List<Integer> distinctInts = new ArrayList<>();
-            
             for (MethodNode mn : cn.methods) {
-                 if (mn.name.equals("<clinit>")) continue; 
-                 ListIterator<AbstractInsnNode> it = mn.instructions.iterator();
-                 while(it.hasNext()) {
-                     AbstractInsnNode insn = it.next();
-                     if (insn instanceof LdcInsnNode) {
-                         LdcInsnNode ldc = (LdcInsnNode) insn;
-                         if (ldc.cst instanceof Integer) {
-                             int val = (Integer) ldc.cst;
-                             if (!distinctInts.contains(val)) distinctInts.add(val);
-                         }
-                     } else if (insn instanceof IntInsnNode) {
-                         IntInsnNode intInsn = (IntInsnNode) insn;
-                         if (intInsn.getOpcode() == Opcodes.SIPUSH || intInsn.getOpcode() == Opcodes.BIPUSH) {
-                             int val = intInsn.operand;
-                             if (!distinctInts.contains(val)) distinctInts.add(val);
-                         }
-                     }
-                 }
-            }
-            
-            if (distinctInts.isEmpty()) continue;
-            
-            NameGenerator ng = new NameGenerator();
-            String fieldName;
-            boolean collision;
-            do {
-                fieldName = ng.next();
-                collision = false;
-                for (FieldNode fn : cn.fields) {
-                    if (fn.name.equals(fieldName)) {
-                        collision = true;
-                        break;
+                ListIterator<AbstractInsnNode> it = mn.instructions.iterator();
+                while (it.hasNext()) {
+                    AbstractInsnNode insn = it.next();
+                    InsnList replacement = null;
+
+                    if (insn instanceof InsnNode) {
+                        replacement = handleInsn(insn.getOpcode());
+                    } else if (insn instanceof IntInsnNode) {
+                        replacement = handleIntInsn((IntInsnNode) insn);
+                    } else if (insn instanceof LdcInsnNode) {
+                        replacement = handleLdcInsn((LdcInsnNode) insn);
+                    }
+
+                    if (replacement != null) {
+                        mn.instructions.insertBefore(insn, replacement);
+                        it.remove();
                     }
                 }
-            } while (collision);
-            cn.fields.add(new FieldNode(Opcodes.ACC_PUBLIC | Opcodes.ACC_STATIC, fieldName, "[I", null, null));
-            
-            MethodNode clinit = null;
-            for (MethodNode mn : cn.methods) {
-                if (mn.name.equals("<clinit>")) {
-                    clinit = mn;
-                    break;
-                }
-            }
-            if (clinit == null) {
-                clinit = new MethodNode(Opcodes.ACC_STATIC, "<clinit>", "()V", null, null);
-                clinit.instructions.add(new InsnNode(Opcodes.RETURN));
-                cn.methods.add(clinit);
-            }
-            
-            InsnList il = new InsnList();
-            il.add(new LdcInsnNode(distinctInts.size()));
-            il.add(new IntInsnNode(Opcodes.NEWARRAY, Opcodes.T_INT));
-            for(int i=0; i<distinctInts.size(); i++) {
-                il.add(new InsnNode(Opcodes.DUP));
-                il.add(new LdcInsnNode(i));
-                il.add(new LdcInsnNode(distinctInts.get(i)));
-                il.add(new InsnNode(Opcodes.IASTORE));
-            }
-            il.add(new FieldInsnNode(Opcodes.PUTSTATIC, cn.name, fieldName, "[I"));
-            clinit.instructions.insert(il);
-            
-            for (MethodNode mn : cn.methods) {
-                 if (mn.name.equals("<clinit>")) continue;
-                 ListIterator<AbstractInsnNode> it = mn.instructions.iterator();
-                 while(it.hasNext()) {
-                     AbstractInsnNode insn = it.next();
-                     int val = Integer.MAX_VALUE; 
-                     boolean found = false;
-                     
-                     if (insn instanceof LdcInsnNode) {
-                         LdcInsnNode ldc = (LdcInsnNode) insn;
-                         if (ldc.cst instanceof Integer) {
-                             val = (Integer) ldc.cst;
-                             found = true;
-                         }
-                     } else if (insn instanceof IntInsnNode) {
-                         IntInsnNode intInsn = (IntInsnNode) insn;
-                         if (intInsn.getOpcode() == Opcodes.SIPUSH || intInsn.getOpcode() == Opcodes.BIPUSH) {
-                             val = intInsn.operand;
-                             found = true;
-                         }
-                     }
-                     
-                     if (found) {
-                         int idx = distinctInts.indexOf(val);
-                         if (idx != -1) {
-                             InsnList replacement = new InsnList();
-                             replacement.add(new FieldInsnNode(Opcodes.GETSTATIC, cn.name, fieldName, "[I"));
-                             replacement.add(new LdcInsnNode(idx));
-                             replacement.add(new InsnNode(Opcodes.IALOAD));
-                             
-                             mn.instructions.insertBefore(insn, replacement);
-                             it.remove();
-                         }
-                     }
-                 }
             }
         }
+    }
+
+    private InsnList handleInsn(int opcode) {
+        switch (opcode) {
+            case Opcodes.ICONST_M1: return obfuscateInt(-1, 3);
+            case Opcodes.ICONST_0: return obfuscateInt(0, 3);
+            case Opcodes.ICONST_1: return obfuscateInt(1, 3);
+            case Opcodes.ICONST_2: return obfuscateInt(2, 3);
+            case Opcodes.ICONST_3: return obfuscateInt(3, 3);
+            case Opcodes.ICONST_4: return obfuscateInt(4, 3);
+            case Opcodes.ICONST_5: return obfuscateInt(5, 3);
+            case Opcodes.LCONST_0: return obfuscateLong(0L, 3);
+            case Opcodes.LCONST_1: return obfuscateLong(1L, 3);
+            case Opcodes.FCONST_0: return obfuscateFloat(0.0f);
+            case Opcodes.FCONST_1: return obfuscateFloat(1.0f);
+            case Opcodes.FCONST_2: return obfuscateFloat(2.0f);
+            case Opcodes.DCONST_0: return obfuscateDouble(0.0);
+            case Opcodes.DCONST_1: return obfuscateDouble(1.0);
+        }
+        return null;
+    }
+
+    private InsnList handleIntInsn(IntInsnNode insn) {
+        if (insn.getOpcode() == Opcodes.BIPUSH || insn.getOpcode() == Opcodes.SIPUSH) {
+            return obfuscateInt(insn.operand, 3);
+        }
+        return null;
+    }
+
+    private InsnList handleLdcInsn(LdcInsnNode insn) {
+        if (insn.cst instanceof Integer) {
+            return obfuscateInt((Integer) insn.cst, 3);
+        } else if (insn.cst instanceof Long) {
+            return obfuscateLong((Long) insn.cst, 3);
+        } else if (insn.cst instanceof Float) {
+            return obfuscateFloat((Float) insn.cst);
+        } else if (insn.cst instanceof Double) {
+            return obfuscateDouble((Double) insn.cst);
+        }
+        return null;
+    }
+
+    private InsnList obfuscateInt(int value, int depth) {
+        InsnList list = new InsnList();
+        if (depth <= 0) {
+            list.add(new LdcInsnNode(value));
+            return list;
+        }
+
+        int type = random.nextInt(4);
+        int key = random.nextInt();
+
+        switch (type) {
+            case 0:
+                list.add(obfuscateInt(value ^ key, depth - 1));
+                list.add(obfuscateInt(key, depth - 1));
+                list.add(new InsnNode(Opcodes.IXOR));
+                break;
+            case 1:
+                list.add(obfuscateInt(value - key, depth - 1));
+                list.add(obfuscateInt(key, depth - 1));
+                list.add(new InsnNode(Opcodes.IADD));
+                break;
+            case 2:
+                list.add(obfuscateInt(value + key, depth - 1));
+                list.add(obfuscateInt(key, depth - 1));
+                list.add(new InsnNode(Opcodes.ISUB));
+                break;
+            case 3:
+                list.add(obfuscateInt(~value, depth - 1));
+                list.add(new InsnNode(Opcodes.ICONST_M1));
+                list.add(new InsnNode(Opcodes.IXOR));
+                break;
+        }
+        return list;
+    }
+
+    private InsnList obfuscateLong(long value, int depth) {
+        InsnList list = new InsnList();
+        if (depth <= 0) {
+            list.add(new LdcInsnNode(value));
+            return list;
+        }
+
+        int type = random.nextInt(4);
+        long key = random.nextLong();
+
+        switch (type) {
+            case 0:
+                list.add(obfuscateLong(value ^ key, depth - 1));
+                list.add(obfuscateLong(key, depth - 1));
+                list.add(new InsnNode(Opcodes.LXOR));
+                break;
+            case 1:
+                list.add(obfuscateLong(value - key, depth - 1));
+                list.add(obfuscateLong(key, depth - 1));
+                list.add(new InsnNode(Opcodes.LADD));
+                break;
+            case 2:
+                list.add(obfuscateLong(value + key, depth - 1));
+                list.add(obfuscateLong(key, depth - 1));
+                list.add(new InsnNode(Opcodes.LSUB));
+                break;
+            case 3:
+                list.add(obfuscateLong(~value, depth - 1));
+                list.add(new LdcInsnNode(-1L));
+                list.add(new InsnNode(Opcodes.LXOR));
+                break;
+        }
+        return list;
+    }
+
+    private InsnList obfuscateFloat(float value) {
+        InsnList list = new InsnList();
+        list.add(new LdcInsnNode(value));
+        return list;
+    }
+
+    private InsnList obfuscateDouble(double value) {
+        InsnList list = new InsnList();
+        list.add(new LdcInsnNode(value));
+        return list;
     }
 }
