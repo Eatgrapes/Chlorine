@@ -5,6 +5,7 @@ import dev.eatgrapes.chlorine.transformers.impl.FieldNameTransformer;
 import dev.eatgrapes.chlorine.transformers.impl.FlowTransformer;
 import dev.eatgrapes.chlorine.transformers.impl.MethodNameTransformer;
 import dev.eatgrapes.chlorine.transformers.impl.NumberObfuscationTransformer;
+import dev.eatgrapes.chlorine.transformers.impl.ReflectionTransformer;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -17,6 +18,7 @@ public class Transformers {
         register(new FieldNameTransformer());
         register(new FlowTransformer());
         register(new NumberObfuscationTransformer());
+        register(new ReflectionTransformer());
     }
 
     public void register(Transformer transformer) {

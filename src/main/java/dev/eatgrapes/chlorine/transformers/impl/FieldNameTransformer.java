@@ -1,6 +1,7 @@
 package dev.eatgrapes.chlorine.transformers.impl;
 
 import dev.eatgrapes.chlorine.transformers.Transformer;
+import dev.eatgrapes.chlorine.utils.AsmUtils;
 import dev.eatgrapes.chlorine.utils.NameGenerator;
 import org.objectweb.asm.Opcodes;
 import org.objectweb.asm.commons.ClassRemapper;
@@ -19,14 +20,15 @@ public class FieldNameTransformer extends Transformer {
     @Override
     public void transform(Map<String, ClassNode> classes, Map<String, String> manifest, Set<String> keeps) {
         Map<String, String> fieldMap = new HashMap<>();
-        
+
         for (ClassNode cn : classes.values()) {
             if (shouldKeep(cn.name, keeps)) continue;
-            
+            if (AsmUtils.isModuleInfo(cn)) continue;
+
             NameGenerator nameGen = new NameGenerator();
             for (FieldNode fn : cn.fields) {
                 String newName = nameGen.next();
-                String key = cn.name + "." + fn.name + "." + fn.desc; 
+                String key = cn.name + "." + fn.name + "." + fn.desc;
                 fieldMap.put(cn.name + "." + fn.name, newName);
             }
         }

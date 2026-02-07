@@ -1,6 +1,7 @@
 package dev.eatgrapes.chlorine.transformers.impl;
 
 import dev.eatgrapes.chlorine.transformers.Transformer;
+import dev.eatgrapes.chlorine.utils.AsmUtils;
 import dev.eatgrapes.chlorine.utils.NameGenerator;
 import org.objectweb.asm.Opcodes;
 import org.objectweb.asm.commons.ClassRemapper;
@@ -19,11 +20,10 @@ public class ClassNameTransformer extends Transformer {
     public void transform(Map<String, ClassNode> classes, Map<String, String> manifest, Set<String> keeps) {
         NameGenerator nameGen = new NameGenerator();
         Map<String, String> mapping = new HashMap<>();
-        
+
         for (ClassNode cn : classes.values()) {
-            if (shouldKeep(cn.name, keeps)) {
-                continue;
-            }
+            if (shouldKeep(cn.name, keeps)) continue;
+            if (AsmUtils.isModuleInfo(cn)) continue;
             String newName = nameGen.next();
             mapping.put(cn.name, newName);
         }

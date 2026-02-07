@@ -6,10 +6,10 @@ A Java bytecode obfuscator built with ASM.
 - **Renaming**: Renames classes, methods, and fields.
 - **Flow Obfuscation**: Implements control flow flattening.
 - **Number Obfuscation**: Obfuscates integer and long constants using recursive arithmetic and bitwise operations.
+- **Reflection Obfuscation**Use Java Apis to obfuscate.
 
 ## TODO
 - *String Obfuscation*
-- *Reflection Obfuscation*
 - etc.
 
 ## Usage
@@ -34,3 +34,4 @@ java -jar chlorine-1.0.0.jar -i <input.jar> -o <output.jar>
 - `FieldRename`
 - `FlowObfuscation`
 - `NumberObfuscation`
+- `Reflection`

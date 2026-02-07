@@ -1,6 +1,7 @@
 package dev.eatgrapes.chlorine.transformers.impl;
 
 import dev.eatgrapes.chlorine.transformers.Transformer;
+import dev.eatgrapes.chlorine.utils.AsmUtils;
 import org.objectweb.asm.Opcodes;
 import org.objectweb.asm.tree.*;
 
@@ -17,7 +18,9 @@ public class NumberObfuscationTransformer extends Transformer {
     @Override
     public void transform(Map<String, ClassNode> classes, Map<String, String> manifest, Set<String> keeps) {
         for (ClassNode cn : classes.values()) {
-            if (shouldKeep(cn.name, keeps) || (cn.access & Opcodes.ACC_INTERFACE) != 0) continue;
+            if (shouldKeep(cn.name, keeps)) continue;
+            if (AsmUtils.isInterface(cn)) continue;
+            if (AsmUtils.isModuleInfo(cn)) continue;
 
             for (MethodNode mn : cn.methods) {
                 ListIterator<AbstractInsnNode> it = mn.instructions.iterator();

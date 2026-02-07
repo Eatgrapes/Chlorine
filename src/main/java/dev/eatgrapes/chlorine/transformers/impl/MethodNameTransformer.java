@@ -1,6 +1,7 @@
 package dev.eatgrapes.chlorine.transformers.impl;
 
 import dev.eatgrapes.chlorine.transformers.Transformer;
+import dev.eatgrapes.chlorine.utils.AsmUtils;
 import dev.eatgrapes.chlorine.utils.NameGenerator;
 import org.objectweb.asm.Opcodes;
 import org.objectweb.asm.commons.ClassRemapper;
@@ -28,6 +29,7 @@ public class MethodNameTransformer extends Transformer {
 
         // 1. Group methods
         for (ClassNode cn : classes.values()) {
+            if (AsmUtils.isModuleInfo(cn)) continue;
             for (MethodNode mn : cn.methods) {
                 String id = cn.name + "." + mn.name + mn.desc;
                 
