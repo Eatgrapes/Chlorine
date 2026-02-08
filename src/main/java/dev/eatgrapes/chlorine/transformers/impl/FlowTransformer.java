@@ -17,7 +17,7 @@ public class FlowTransformer extends Transformer {
             
             for (MethodNode mn : cn.methods) {
                 if (mn.instructions.size() > 0 && (mn.access & Opcodes.ACC_ABSTRACT) == 0 && (mn.access & Opcodes.ACC_NATIVE) == 0) {
-                     if (mn.tryCatchBlocks.isEmpty() && mn.instructions.size() > 10) {
+                     if (mn.instructions.size() > 10) {
                          applyFlattening(mn);
                      }
                 }
@@ -89,7 +89,6 @@ public class FlowTransformer extends Transformer {
         mn.instructions.add(tryNPE_End);
         mn.instructions.add(new InsnNode(Opcodes.ATHROW));
         
-        // Trigger ClassCastException
         mn.instructions.add(caseStep2);
         mn.instructions.add(tryCCE_Start);
         mn.instructions.add(new FieldInsnNode(Opcodes.GETSTATIC, "java/lang/System", "out", "Ljava/io/PrintStream;"));

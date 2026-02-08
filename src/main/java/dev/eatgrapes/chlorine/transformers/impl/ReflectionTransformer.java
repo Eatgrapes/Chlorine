@@ -39,7 +39,7 @@ public class ReflectionTransformer extends Transformer {
             if (insn instanceof MethodInsnNode) {
                 MethodInsnNode min = (MethodInsnNode) insn;
                 if (shouldTransformMethodCall(min)) {
-                    InsnList replacement = createReflectiveMethodCall(min);
+                    InsnList replacement = createReflectiveMethodCall(mn, min);
                     if (replacement != null) {
                         mn.instructions.insertBefore(insn, replacement);
                         it.remove();
@@ -48,7 +48,7 @@ public class ReflectionTransformer extends Transformer {
             } else if (insn instanceof FieldInsnNode) {
                 FieldInsnNode fin = (FieldInsnNode) insn;
                 if (shouldTransformFieldAccess(fin)) {
-                    InsnList replacement = createReflectiveFieldAccess(fin);
+                    InsnList replacement = createReflectiveFieldAccess(mn, fin);
                     if (replacement != null) {
                         mn.instructions.insertBefore(insn, replacement);
                         it.remove();
@@ -74,7 +74,7 @@ public class ReflectionTransformer extends Transformer {
         return random.nextInt(100) < 40;
     }
 
-    private InsnList createReflectiveMethodCall(MethodInsnNode min) {
+    private InsnList createReflectiveMethodCall(MethodNode mn, MethodInsnNode min) {
         String className = min.owner.replace('/', '.');
         String methodName = min.name;
         String desc = min.desc;
@@ -86,11 +86,19 @@ public class ReflectionTransformer extends Transformer {
         if (paramCount > 0) return null;
 
         InsnBuilder b = InsnBuilder.create();
+        
+        LabelNode start = new LabelNode();
+        LabelNode end = new LabelNode();
+        LabelNode handler = new LabelNode();
+        LabelNode continueLabel = new LabelNode();
+        
+        mn.tryCatchBlocks.add(new TryCatchBlockNode(start, end, handler, "java/lang/Throwable"));
 
-        b.add(encryptString(className));
+        b.label(start);
+        b.ldc(className);
         b.invokeStatic("java/lang/Class", "forName", "(Ljava/lang/String;)Ljava/lang/Class;");
 
-        b.add(encryptString(methodName));
+        b.ldc(methodName);
 
         b.iconst(0);
         b.type(Opcodes.ANEWARRAY, "java/lang/Class");
@@ -110,6 +118,13 @@ public class ReflectionTransformer extends Transformer {
         b.type(Opcodes.ANEWARRAY, "java/lang/Object");
 
         b.invokeVirtual("java/lang/reflect/Method", "invoke", "(Ljava/lang/Object;[Ljava/lang/Object;)Ljava/lang/Object;");
+        b.label(end);
+        b.jump(Opcodes.GOTO, continueLabel);
+        
+        b.label(handler);
+        b.insn(Opcodes.ATHROW);
+        
+        b.label(continueLabel);
 
         if (returnType.equals("V")) {
             b.pop();
@@ -124,7 +139,7 @@ public class ReflectionTransformer extends Transformer {
         return b.build();
     }
 
-    private InsnList createReflectiveFieldAccess(FieldInsnNode fin) {
+    private InsnList createReflectiveFieldAccess(MethodNode mn, FieldInsnNode fin) {
         String className = fin.owner.replace('/', '.');
         String fieldName = fin.name;
         String desc = fin.desc;
@@ -135,11 +150,19 @@ public class ReflectionTransformer extends Transformer {
         if (!isGet || !isStatic) return null;
 
         InsnBuilder b = InsnBuilder.create();
+        
+        LabelNode start = new LabelNode();
+        LabelNode end = new LabelNode();
+        LabelNode handler = new LabelNode();
+        LabelNode continueLabel = new LabelNode();
+        
+        mn.tryCatchBlocks.add(new TryCatchBlockNode(start, end, handler, "java/lang/Throwable"));
 
-        b.add(encryptString(className));
+        b.label(start);
+        b.ldc(className);
         b.invokeStatic("java/lang/Class", "forName", "(Ljava/lang/String;)Ljava/lang/Class;");
 
-        b.add(encryptString(fieldName));
+        b.ldc(fieldName);
         b.invokeVirtual("java/lang/Class", "getDeclaredField", "(Ljava/lang/String;)Ljava/lang/reflect/Field;");
         b.dup();
         b.iconst(1);
@@ -147,6 +170,13 @@ public class ReflectionTransformer extends Transformer {
 
         b.aconst_null();
         b.invokeVirtual("java/lang/reflect/Field", "get", "(Ljava/lang/Object;)Ljava/lang/Object;");
+        b.label(end);
+        b.jump(Opcodes.GOTO, continueLabel);
+        
+        b.label(handler);
+        b.insn(Opcodes.ATHROW);
+        
+        b.label(continueLabel);
 
         if (AsmUtils.isPrimitiveDesc(desc)) {
             b.add(unboxPrimitive(desc));
@@ -161,27 +191,6 @@ public class ReflectionTransformer extends Transformer {
             }
             b.checkcast(castType);
         }
-
-        return b.build();
-    }
-
-    private InsnList encryptString(String str) {
-        int key = random.nextInt(200) + 1;
-
-        InsnBuilder b = InsnBuilder.create();
-        b.newInstance("java/lang/StringBuilder");
-        b.invokeSpecial("java/lang/StringBuilder", "<init>", "()V");
-
-        for (int i = 0; i < str.length(); i++) {
-            int encrypted = str.charAt(i) ^ key;
-            b.ldc(encrypted);
-            b.ldc(key);
-            b.insn(Opcodes.IXOR);
-            b.insn(Opcodes.I2C);
-            b.invokeVirtual("java/lang/StringBuilder", "append", "(C)Ljava/lang/StringBuilder;");
-        }
-
-        b.invokeVirtual("java/lang/StringBuilder", "toString", "()Ljava/lang/String;");
 
         return b.build();
     }
