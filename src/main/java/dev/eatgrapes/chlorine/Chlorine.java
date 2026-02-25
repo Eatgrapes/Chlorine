@@ -8,6 +8,7 @@ import org.objectweb.asm.ClassWriter;
 import org.objectweb.asm.tree.ClassNode;
 
 import java.io.*;
+import java.nio.file.Path;
 import java.util.*;
 import java.util.jar.*;
 
@@ -33,6 +34,7 @@ public class Chlorine {
 
             File inputFile = new File(cmd.getOptionValue("i"));
             File outputFile = new File(cmd.getOptionValue("o", inputFile.getName().replace(".jar", "-obf.jar")));
+            validateOutputPathSafety(inputFile, outputFile);
             
             Set<String> keeps = new HashSet<>();
             if (cmd.hasOption("k")) {
@@ -55,8 +57,43 @@ public class Chlorine {
 
             process(inputFile, outputFile, toRun, keeps);
 
+        } catch (IllegalArgumentException e) {
+            System.err.println("Error: " + e.getMessage());
+            System.exit(1);
         } catch (Exception e) {
             e.printStackTrace();
+            System.exit(1);
+        }
+    }
+
+    private static void validateOutputPathSafety(File inputFile, File outputFile) throws IOException {
+        Path inputPath = inputFile.getCanonicalFile().toPath();
+        Path outputPath = outputFile.getCanonicalFile().toPath();
+        if (outputPath.equals(inputPath)) {
+            throw new IllegalArgumentException("Output path must differ from input path (-i).");
+        }
+
+        Path runningJarPath = getRunningJarPath();
+        if (runningJarPath != null && outputPath.equals(runningJarPath)) {
+            throw new IllegalArgumentException("Output path must differ from the running Chlorine JAR.");
+        }
+    }
+
+    private static Path getRunningJarPath() {
+        try {
+            if (Chlorine.class.getProtectionDomain() == null ||
+                Chlorine.class.getProtectionDomain().getCodeSource() == null ||
+                Chlorine.class.getProtectionDomain().getCodeSource().getLocation() == null) {
+                return null;
+            }
+
+            File location = new File(Chlorine.class.getProtectionDomain().getCodeSource().getLocation().toURI());
+            if (!location.getName().endsWith(".jar")) {
+                return null;
+            }
+            return location.getCanonicalFile().toPath();
+        } catch (Exception ignored) {
+            return null;
         }
     }
 

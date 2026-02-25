@@ -18,9 +18,25 @@ import java.util.*;
 public class StringEncryptionTransformer extends Transformer {
     private final byte[] keyBytes = new byte[16];
     private final NameGenerator nameGen = new NameGenerator();
+    private final Random random = new Random();
+
+    private final int helperMul;
+    private final int helperAdd;
+    private final int helperRot;
+    private final int helperXor;
 
     public StringEncryptionTransformer() {
-        new Random().nextBytes(keyBytes);
+        random.nextBytes(keyBytes);
+
+        int mul;
+        do {
+            mul = random.nextInt() | 1;
+        } while (mul == 1 || mul == -1);
+        this.helperMul = mul;
+
+        this.helperAdd = random.nextInt();
+        this.helperRot = 1 + random.nextInt(31);
+        this.helperXor = random.nextInt();
     }
 
     @Override
@@ -39,7 +55,7 @@ public class StringEncryptionTransformer extends Transformer {
 
         if (candidates.isEmpty()) return;
 
-        ClassNode hostClass = candidates.get(new Random().nextInt(candidates.size()));
+        ClassNode hostClass = candidates.get(random.nextInt(candidates.size()));
         String decryptName = nameGen.nextMethod();
         String bootstrapName = nameGen.nextMethod();
         String xorName = nameGen.nextMethod();
@@ -193,7 +209,7 @@ public class StringEncryptionTransformer extends Transformer {
     private String encrypt(String original) throws Exception {
         byte[] input = original.getBytes(StandardCharsets.UTF_8);
         byte[] iv = new byte[16];
-        new Random().nextBytes(iv);
+        random.nextBytes(iv);
         IvParameterSpec ivSpec = new IvParameterSpec(iv);
         SecretKeySpec skeySpec = new SecretKeySpec(keyBytes, "AES");
 
@@ -201,10 +217,6 @@ public class StringEncryptionTransformer extends Transformer {
         cipher.init(Cipher.ENCRYPT_MODE, skeySpec, ivSpec);
 
         byte[] encrypted = cipher.doFinal(input);
-
-        for (int i = 0; i < encrypted.length; i++) {
-            encrypted[i] = (byte) (encrypted[i] ^ keyBytes[i % keyBytes.length]);
-        }
 
         byte[] combined = new byte[iv.length + encrypted.length];
         System.arraycopy(iv, 0, combined, 0, iv.length);
@@ -292,34 +304,6 @@ public class StringEncryptionTransformer extends Transformer {
             b.bipush(keyBytes[i]);
             b.insn(Opcodes.BASTORE);
         }
-
-        b.iconst(0);
-        b.var(Opcodes.ISTORE, 7);
-        LabelNode loopStart = new LabelNode();
-        LabelNode loopEnd = new LabelNode();
-        b.label(loopStart);
-        b.var(Opcodes.ILOAD, 7);
-        b.var(Opcodes.ALOAD, 5);
-        b.insn(Opcodes.ARRAYLENGTH);
-        b.jump(Opcodes.IF_ICMPGE, loopEnd);
-        
-        b.var(Opcodes.ALOAD, 5);
-        b.var(Opcodes.ILOAD, 7);
-        b.var(Opcodes.ALOAD, 5);
-        b.var(Opcodes.ILOAD, 7);
-        b.insn(Opcodes.BALOAD);
-        b.var(Opcodes.ALOAD, 6);
-        b.var(Opcodes.ILOAD, 7);
-        b.bipush(16);
-        b.insn(Opcodes.IREM);
-        b.insn(Opcodes.BALOAD);
-        b.insn(Opcodes.IXOR);
-        b.insn(Opcodes.I2B);
-        b.insn(Opcodes.BASTORE);
-        
-        b.iinc(7, 1);
-        b.jump(Opcodes.GOTO, loopStart);
-        b.label(loopEnd);
 
         pushStringStack(b, "javax.crypto.Cipher", owner, xorName);
         b.invokeStatic("java/lang/Class", "forName", "(Ljava/lang/String;)Ljava/lang/Class;");
@@ -471,12 +455,17 @@ public class StringEncryptionTransformer extends Transformer {
 
     private MethodNode createXorHelper(String methodName) {
         MethodNode mn = new MethodNode(Opcodes.ACC_PUBLIC | Opcodes.ACC_STATIC, methodName, "(Ljava/lang/String;I)Ljava/lang/String;", null, null);
-        mn.maxLocals = 10;
+        mn.maxLocals = 12;
         InsnBuilder b = InsnBuilder.create();
         
         b.var(Opcodes.ALOAD, 0);
         b.invokeVirtual("java/lang/String", "toCharArray", "()[C");
         b.var(Opcodes.ASTORE, 2);
+
+        b.var(Opcodes.ILOAD, 1);
+        b.ldc(helperXor);
+        b.insn(Opcodes.IXOR);
+        b.var(Opcodes.ISTORE, 4);
         
         b.iconst(0);
         b.var(Opcodes.ISTORE, 3);
@@ -489,12 +478,23 @@ public class StringEncryptionTransformer extends Transformer {
         b.var(Opcodes.ALOAD, 2);
         b.insn(Opcodes.ARRAYLENGTH);
         b.jump(Opcodes.IF_ICMPGE, end);
+
+        b.var(Opcodes.ILOAD, 4);
+        b.ldc(helperMul);
+        b.insn(Opcodes.IMUL);
+        b.ldc(helperAdd);
+        b.insn(Opcodes.IADD);
+        b.var(Opcodes.ILOAD, 3);
+        b.insn(Opcodes.IADD);
+        b.ldc(helperRot);
+        b.invokeStatic("java/lang/Integer", "rotateLeft", "(II)I");
+        b.var(Opcodes.ISTORE, 4);
         
         b.var(Opcodes.ALOAD, 2);
         b.var(Opcodes.ILOAD, 3);
         b.insn(Opcodes.DUP2);
         b.insn(Opcodes.CALOAD);
-        b.var(Opcodes.ILOAD, 1);
+        b.var(Opcodes.ILOAD, 4);
         b.insn(Opcodes.IXOR);
         b.insn(Opcodes.I2C);
         b.insn(Opcodes.CASTORE);
@@ -537,13 +537,15 @@ public class StringEncryptionTransformer extends Transformer {
     }
 
     private void pushStringStack(InsnBuilder b, String s, String owner, String xorName) {
-        int key = new Random().nextInt(255);
+        int key = random.nextInt();
         char[] chars = s.toCharArray();
-        char[] encrypted = new char[chars.length];
+
+        int k = key ^ helperXor;
         for (int i = 0; i < chars.length; i++) {
-            encrypted[i] = (char) (chars[i] ^ key);
+            k = Integer.rotateLeft(k * helperMul + helperAdd + i, helperRot);
+            chars[i] = (char) (chars[i] ^ (k & 0xFFFF));
         }
-        String encryptedString = new String(encrypted);
+        String encryptedString = new String(chars);
         
         b.ldc(encryptedString);
         b.ldc(key);
