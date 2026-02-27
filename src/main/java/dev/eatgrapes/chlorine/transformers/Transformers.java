@@ -18,9 +18,9 @@ public class Transformers {
         register(new MethodNameTransformer());
         register(new FieldNameTransformer());
         register(new NumberObfuscationTransformer());
-        register(new ReflectionTransformer());
         register(new StringEncryptionTransformer());
         register(new FlowTransformer());
+        register(new ReflectionTransformer());
     }
 
     public void register(Transformer transformer) {

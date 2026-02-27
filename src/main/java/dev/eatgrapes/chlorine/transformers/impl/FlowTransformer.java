@@ -12,9 +12,9 @@ public class FlowTransformer extends Transformer {
     private static final int MIN_INSTRUCTION_COUNT = 12;
     private static final int EXCEPTION_STAGE_COUNT = 3;
     private static final int MIN_JUNK_CASES = 2;
-    private static final int MAX_JUNK_CASES = 4;
-    private static final int MIN_DISPATCH_BUDGET = 10;
-    private static final int MAX_DISPATCH_BUDGET = 18;
+    private static final int MAX_JUNK_CASES = 3;
+    private static final int MIN_DISPATCH_BUDGET = 8;
+    private static final int MAX_DISPATCH_BUDGET = 14;
 
     private final Random random = new Random();
 
@@ -29,6 +29,7 @@ public class FlowTransformer extends Transformer {
 
             for (MethodNode mn : cn.methods) {
                 if (!shouldTransformMethod(mn)) continue;
+                if (!shouldApplyByMethodSize(mn)) continue;
                 applyFlattening(mn);
             }
         }
@@ -38,6 +39,7 @@ public class FlowTransformer extends Transformer {
         if (mn.instructions == null || mn.instructions.size() < MIN_INSTRUCTION_COUNT) return false;
         if (AsmUtils.isAbstract(mn) || AsmUtils.isNative(mn)) return false;
         if (AsmUtils.isConstructor(mn)) return false;
+        if ((mn.access & Opcodes.ACC_SYNTHETIC) != 0) return false;
 
         for (AbstractInsnNode insn : mn.instructions) {
             int opcode = insn.getOpcode();
@@ -49,6 +51,14 @@ public class FlowTransformer extends Transformer {
         return true;
     }
 
+    private boolean shouldApplyByMethodSize(MethodNode mn) {
+        int size = mn.instructions.size();
+        if (size <= 60) return true;
+        if (size <= 140) return random.nextInt(100) < 90;
+        if (size <= 260) return random.nextInt(100) < 72;
+        return random.nextInt(100) < 45;
+    }
+
     private void applyFlattening(MethodNode mn) {
         InsnList original = new InsnList();
         original.add(mn.instructions);
@@ -57,7 +67,8 @@ public class FlowTransformer extends Transformer {
         int mixVar = mn.maxLocals + 1;
         int sinkVar = mn.maxLocals + 2;
         int budgetVar = mn.maxLocals + 3;
-        mn.maxLocals += 4;
+        int gateResumeVar = mn.maxLocals + 4;
+        mn.maxLocals += 5;
 
         Set<Integer> stableLoadSlots = collectStableLoadSlots(mn);
         List<AbstractInsnNode> snippetPool = collectSnippetPool(original, stableLoadSlots);
@@ -69,6 +80,9 @@ public class FlowTransformer extends Transformer {
         int keyBridge = nextKey(usedKeys);
         int keyExit = nextKey(usedKeys);
         int keyReal = nextKey(usedKeys);
+        int keyGate = nextKey(usedKeys);
+        int gateResumeMask = random.nextInt();
+        int gatePredicateMask = (1 << (2 + random.nextInt(3))) - 1;
         Type returnType = Type.getReturnType(mn.desc);
 
         int junkCaseCount = MIN_JUNK_CASES + random.nextInt(MAX_JUNK_CASES - MIN_JUNK_CASES + 1);
@@ -88,6 +102,7 @@ public class FlowTransformer extends Transformer {
         LabelNode caseBridge = new LabelNode();
         LabelNode caseExitPivot = new LabelNode();
         LabelNode caseReal = new LabelNode();
+        LabelNode caseGate = new LabelNode();
 
         List<ExceptionPattern> patterns = pickExceptionPatterns(EXCEPTION_STAGE_COUNT);
 
@@ -113,6 +128,7 @@ public class FlowTransformer extends Transformer {
         dispatchCases.put(keyBridge, caseBridge);
         dispatchCases.put(keyExit, caseExitPivot);
         dispatchCases.put(keyReal, caseReal);
+        dispatchCases.put(keyGate, caseGate);
         for (int i = 0; i < junkCaseCount; i++) {
             dispatchCases.put(junkKeys.get(i), junkLabels.get(i));
         }
@@ -124,10 +140,11 @@ public class FlowTransformer extends Transformer {
         mn.instructions.add(new VarInsnNode(Opcodes.ISTORE, mixVar));
         pushInt(mn.instructions, random.nextInt());
         mn.instructions.add(new VarInsnNode(Opcodes.ISTORE, sinkVar));
+        pushInt(mn.instructions, keyStage0 ^ gateResumeMask);
+        mn.instructions.add(new VarInsnNode(Opcodes.ISTORE, gateResumeVar));
 
-        mn.instructions.add(new MethodInsnNode(Opcodes.INVOKESTATIC, "java/lang/System", "nanoTime", "()J", false));
-        mn.instructions.add(new InsnNode(Opcodes.L2I));
         mn.instructions.add(new VarInsnNode(Opcodes.ILOAD, mixVar));
+        pushInt(mn.instructions, random.nextInt());
         mn.instructions.add(new InsnNode(Opcodes.IXOR));
         mn.instructions.add(new VarInsnNode(Opcodes.ILOAD, sinkVar));
         mn.instructions.add(new InsnNode(Opcodes.IADD));
@@ -176,6 +193,25 @@ public class FlowTransformer extends Transformer {
         mn.instructions.add(new VarInsnNode(Opcodes.ISTORE, budgetVar));
 
         mn.instructions.add(dispatchReady);
+        LabelNode directDispatch = new LabelNode();
+        mn.instructions.add(new VarInsnNode(Opcodes.ILOAD, budgetVar));
+        mn.instructions.add(new InsnNode(Opcodes.ICONST_1));
+        mn.instructions.add(new JumpInsnNode(Opcodes.IF_ICMPLE, directDispatch));
+        mn.instructions.add(new VarInsnNode(Opcodes.ILOAD, mixVar));
+        mn.instructions.add(new VarInsnNode(Opcodes.ILOAD, sinkVar));
+        mn.instructions.add(new InsnNode(Opcodes.IXOR));
+        mn.instructions.add(new VarInsnNode(Opcodes.ILOAD, budgetVar));
+        mn.instructions.add(new InsnNode(Opcodes.IXOR));
+        pushInt(mn.instructions, gatePredicateMask);
+        mn.instructions.add(new InsnNode(Opcodes.IAND));
+        mn.instructions.add(new JumpInsnNode(Opcodes.IFNE, directDispatch));
+        mn.instructions.add(new VarInsnNode(Opcodes.ILOAD, stateVar));
+        pushInt(mn.instructions, gateResumeMask);
+        mn.instructions.add(new InsnNode(Opcodes.IXOR));
+        mn.instructions.add(new VarInsnNode(Opcodes.ISTORE, gateResumeVar));
+        pushInt(mn.instructions, keyGate);
+        mn.instructions.add(new VarInsnNode(Opcodes.ISTORE, stateVar));
+        mn.instructions.add(directDispatch);
         mn.instructions.add(new VarInsnNode(Opcodes.ILOAD, stateVar));
 
         appendLookupSwitch(mn.instructions, dispatchCases, defaultLabel);
@@ -289,6 +325,14 @@ public class FlowTransformer extends Transformer {
                     snippetPool
             );
         }
+
+        mn.instructions.add(caseGate);
+        emitCasePayload(mn.instructions, mixVar, sinkVar, snippetPool, true);
+        mn.instructions.add(new VarInsnNode(Opcodes.ILOAD, gateResumeVar));
+        pushInt(mn.instructions, gateResumeMask);
+        mn.instructions.add(new InsnNode(Opcodes.IXOR));
+        mn.instructions.add(new VarInsnNode(Opcodes.ISTORE, stateVar));
+        mn.instructions.add(new JumpInsnNode(Opcodes.GOTO, loopHead));
 
         mn.instructions.add(caseBridge);
         emitCasePayload(mn.instructions, mixVar, sinkVar, snippetPool, true);
@@ -499,15 +543,18 @@ public class FlowTransformer extends Transformer {
                 out.add(new IincInsnNode(mixVar, randomSignedSmall()));
                 break;
             case 2:
-                out.add(new MethodInsnNode(Opcodes.INVOKESTATIC, "java/lang/System", "nanoTime", "()J", false));
-                out.add(new InsnNode(Opcodes.L2I));
                 out.add(new VarInsnNode(Opcodes.ILOAD, mixVar));
+                out.add(new VarInsnNode(Opcodes.ILOAD, sinkVar));
+                out.add(new InsnNode(Opcodes.IADD));
+                pushInt(out, random.nextInt());
                 out.add(new InsnNode(Opcodes.IXOR));
                 out.add(new VarInsnNode(Opcodes.ISTORE, mixVar));
 
                 out.add(new VarInsnNode(Opcodes.ILOAD, sinkVar));
                 pushInt(out, random.nextInt());
                 out.add(new InsnNode(Opcodes.IADD));
+                out.add(new VarInsnNode(Opcodes.ILOAD, mixVar));
+                out.add(new InsnNode(Opcodes.IXOR));
                 out.add(new VarInsnNode(Opcodes.ISTORE, sinkVar));
                 break;
             default:

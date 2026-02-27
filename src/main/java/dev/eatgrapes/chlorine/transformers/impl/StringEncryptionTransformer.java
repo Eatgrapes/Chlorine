@@ -226,7 +226,7 @@ public class StringEncryptionTransformer extends Transformer {
     }
 
     private MethodNode createDecryptMethod(String owner, String methodName, String xorName) {
-        MethodNode mn = new MethodNode(Opcodes.ACC_PUBLIC | Opcodes.ACC_STATIC, methodName, "(Ljava/lang/String;)Ljava/lang/String;", null, null);
+        MethodNode mn = new MethodNode(Opcodes.ACC_PRIVATE | Opcodes.ACC_STATIC | Opcodes.ACC_SYNTHETIC, methodName, "(Ljava/lang/String;)Ljava/lang/String;", null, null);
         mn.maxLocals = 20;
         InsnBuilder b = InsnBuilder.create();
 
@@ -454,7 +454,7 @@ public class StringEncryptionTransformer extends Transformer {
     }
 
     private MethodNode createXorHelper(String methodName) {
-        MethodNode mn = new MethodNode(Opcodes.ACC_PUBLIC | Opcodes.ACC_STATIC, methodName, "(Ljava/lang/String;I)Ljava/lang/String;", null, null);
+        MethodNode mn = new MethodNode(Opcodes.ACC_PRIVATE | Opcodes.ACC_STATIC | Opcodes.ACC_SYNTHETIC, methodName, "(Ljava/lang/String;I)Ljava/lang/String;", null, null);
         mn.maxLocals = 12;
         InsnBuilder b = InsnBuilder.create();
         
@@ -513,7 +513,7 @@ public class StringEncryptionTransformer extends Transformer {
     }
 
     private MethodNode createBootstrapMethod(String owner, String methodName, String decryptName) {
-        MethodNode mn = new MethodNode(Opcodes.ACC_PUBLIC | Opcodes.ACC_STATIC, methodName, 
+        MethodNode mn = new MethodNode(Opcodes.ACC_PUBLIC | Opcodes.ACC_STATIC | Opcodes.ACC_SYNTHETIC, methodName, 
             "(Ljava/lang/invoke/MethodHandles$Lookup;Ljava/lang/String;Ljava/lang/invoke/MethodType;Ljava/lang/String;)Ljava/lang/invoke/CallSite;", null, null);
         mn.maxLocals = 10;
         InsnBuilder b = InsnBuilder.create();
